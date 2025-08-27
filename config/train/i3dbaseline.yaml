@@ -7,10 +7,12 @@ data:
   name: "DriveAndAct"
   util_location: "framework_activity_recognition.datautils.prepare_drivenact"
   split_nr: 0 # 1 2
-  folder_splits: # path to folder containing split ex: "./driveandact/iccv_activities_3s/activities_3s/"
-  data_path: # path to folder containing downsampled Drive&Act video data
+  folder_splits: "/lustre/scratch/client/vinai/users/baopg4/datasets/driveandact/iccv_activities_3s/activities_3s/" # spp
+  data_path: "/lustre/scratch/client/vinai/users/baopg4/datasets/driveandact/inner_mirror/"
+  # folder_splits: "/home/baogp4/datasets/driveandact/iccv_activities_3s/activities_3s/" # path to folder containing split ex: "./driveandact/iccv_activities_3s/activities_3s/"
+  # data_path: "/home/baogp4/datasets/driveandact/inner_mirror/" # path to folder containing downsampled Drive&Act video data
   views: ["inner_mirror"]
-  new_suffix: ".avi"
+  new_suffix: ".mp4" #.avi
   sampler:
     use: True
     location: "framework_activity_recognition.sampler.ImbalancedDatasetSampler"
@@ -26,7 +28,7 @@ student:
 
 pretraining:
   use: True
-  path: # path to I3D model pretrained with Kinetics-400
+  path: "model/model_rgb.pth" # path to I3D model pretrained with Kinetics-400
   model_num_classes: 400
   fine_tune_only_last_layer: False
   last_layer_variable: "conv3d_0c_1x1"
@@ -41,8 +43,8 @@ train:
   optimizer:
     name: "SGD"
     parameter: {"lr": 0.05, "momentum": 0.9}
-  batch_size: 15
-  num_workers: 4
+  batch_size: 4 #15
+  num_workers: 2 # 4
   scheduler:
     use: True
     name: "MultiStepLR"

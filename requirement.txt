@@ -2,7 +2,7 @@ absl-py==1.0.0
 cachetools==4.2.4
 certifi==2021.10.8
 charset-normalizer==2.0.12
-dataclasses==0.8
+dataclasses==0.6 # 0.8
 google-auth==2.6.0
 google-auth-oauthlib==0.4.6
 grpcio==1.43.0
@@ -15,7 +15,7 @@ oauthlib==3.2.0
 opencv-python==4.5.5.62
 pandas==1.1.5
 Pillow==8.4.0
-pkg_resources==0.0.0
+#pkg_resources=0.0.0
 protobuf==3.19.4
 pyasn1==0.4.8
 pyasn1-modules==0.2.8

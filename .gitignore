@@ -27,6 +27,7 @@ runs/  # from TensorBoard
 *.log
 
 # Data and results
+model/
 data/
 output/
 results/

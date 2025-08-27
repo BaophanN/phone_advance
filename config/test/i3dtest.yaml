@@ -2,8 +2,8 @@ data:
   name: "DriveAndAct"
   util_location: "framework_activity_recognition.datautils.prepare_drivenact_test"
   split_nr: 0 # 1 2
-  folder_splits: # path to folder containing split ex: "./driveandact/iccv_activities_3s/activities_3s/"
-  data_path: # path to folder containing downsampled Drive&Act video data
+  folder_splits: "/home/baogp4/datasets/driveandact/iccv_activities_3s/activities_3s" # path to folder containing split ex: "./driveandact/iccv_activities_3s/activities_3s/"
+  data_path: "/home/baogp4/datasets/driveandact/" # path to folder containing downsampled Drive&Act video data
   views: ["inner_mirror"]
   new_suffix: ".avi"
   n_frame: 16 # 32 64
@@ -14,7 +14,7 @@ architecture:
   modality: "rgb"
   dropout_prob: 0.5
   name: "inception"
-  model: # path to I3D model checkpoint to test ex: ./best_model.pth, adjust according splits
+  model: "model/model_rgb.pth" # path to I3D model checkpoint to test ex: ./best_model.pth, adjust according splits
 
 train:
   batch_size: 15

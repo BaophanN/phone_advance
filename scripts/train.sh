@@ -1,0 +1,1 @@
+python -m framework_activity_recognition config/train/i3dbaseline.yaml
