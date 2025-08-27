@@ -43,8 +43,8 @@ train:
   optimizer:
     name: "SGD"
     parameter: {"lr": 0.05, "momentum": 0.9}
-  batch_size: 30 #15
-  num_workers: 8 # 4
+  batch_size: 60 #15
+  num_workers: 16 # 4
   scheduler:
     use: True
     name: "MultiStepLR"
