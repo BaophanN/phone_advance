@@ -2,6 +2,7 @@ import torch.nn as nn
 from pkg_resources import parse_version
 from torch.autograd import Variable
 from timeit import default_timer as timer
+from tqdm import tqdm
 import time
 import numpy as np
 import torch
@@ -57,125 +58,143 @@ class QuantizationAwareTrainingWrapper():
         self.freeze_bn = freeze_bn
         self.freeze_observer = freeze_observer
 
-    def train(self, train_loader, test_loader):
-        """
-        This method represents training procedure. Based on parameter passed in the constructor, features are activated
-        Arguments:
-            train_loader: data loader of training dataset
-            test_loader: data loader of test dataset
-        """
+def train(self, train_loader, test_loader):
+    """
+    This method represents training procedure. Based on parameter passed in the constructor, features are activated
+    Arguments:
+        train_loader: data loader of training dataset
+        test_loader: data loader of test dataset
+    """
+    if torch.cuda.is_available():
+        self.logger.info("CUDA FOUND")
+        self.student_network.cuda()
+        if self.teacher_network is not None:
+            self.teacher_network.cuda()
 
+    self.student_network.train()
+    if self.teacher_network is not None:
+        self.teacher_network.eval()
+
+    for epoch in range(self.max_epochs):
+
+        if parse_version(torch.__version__) >= parse_version("0.4.0"):
+            torch.set_grad_enabled(True)
+            print("Pytorch version >= 0.4.0")
+        else:
+            print("Pytorch version < 0.4.0")
+
+        self.student_network.train()
         if torch.cuda.is_available():
-            self.logger.info("CUDA FOUND")
             self.student_network.cuda()
             if self.teacher_network is not None:
                 self.teacher_network.cuda()
-        
-        self.student_network.train()
-        if self.teacher_network is not None:    
+        if self.teacher_network is not None:
             self.teacher_network.eval()
 
-        for epoch in range(self.max_epochs):
+        self.optimizer.zero_grad()
+        mini_batch_losses = []
 
-            if parse_version(torch.__version__) >= parse_version("0.4.0"):
-                torch.set_grad_enabled(True)
-                print("Pytorch version >= 0.4.0")
-            else:
-                print("Pytorch version < 0.4.0")
+        if self.current_epoch != 0:
+            self.logger.info("Continuing training from epoch: " + str(self.current_epoch))
+        else:
+            self.logger.info("Starting training model/pretrained model")
 
-            self.student_network.train()
+        if self.freeze_bn is not None and epoch > self.freeze_bn:
+            self.student_network.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+        if self.freeze_observer is not None and epoch > self.freeze_observer:
+            self.student_network.apply(torch.quantization.disable_observer)
+
+        progress_bar = tqdm(enumerate(train_loader, 0), total=len(train_loader), desc=f"Epoch {self.current_epoch+1}")
+        for i, data in progress_bar:
+            inputs, target = data
+
             if torch.cuda.is_available():
-                self.student_network.cuda()
-                if self.teacher_network is not None:
-                    self.teacher_network.cuda()
-            if self.teacher_network is not None:    
-                self.teacher_network.eval()
+                inputs, target = Variable(inputs.cuda()), Variable(target.cuda())
+            else:
+                inputs, target = Variable(inputs), Variable(target)
 
+            student_outputs = self.student_network(inputs)
+            softmaxFunction = nn.Softmax(dim=1)
+            current_loss = self.criterion(softmaxFunction(student_outputs), target)
+
+            if self.teacher_network is not None:
+                current_loss = (1 - self.teacher_weight) * current_loss
+                with torch.no_grad():
+                    teacher_outputs = self.teacher_network(inputs)
+                logSoftmaxFunction = nn.LogSoftmax(dim=1)
+                klDiv = nn.KLDivLoss()
+                current_loss += self.teacher_weight * self.temperature**2 * klDiv(
+                    logSoftmaxFunction(student_outputs / self.temperature),
+                    softmaxFunction(teacher_outputs / self.temperature)
+                )
+
+            self.logger.info(f'Trained on epoch {str(self.current_epoch + 1)}, current loss: {current_loss:.6f}')
+            mini_batch_losses.append(float(current_loss))
+            current_loss.backward()
+            self.optimizer.step()
             self.optimizer.zero_grad()
 
-            mini_batch_losses = []
+            # Update progress bar display
+            progress_bar.set_postfix({
+                'loss': f"{float(current_loss):.4f}",
+                'lr': f"{self.scheduler.get_last_lr()[0]:.6f}" if self.scheduler else f"{self.optimizer.param_groups[0]['lr']:.6f}"
+            })
 
-            if self.current_epoch != 0:
-                self.logger.info("Continuing training from epoch: " + str(self.current_epoch))
-            else:
-                self.logger.info("Starting training model/pretrained model")
+        # Scheduler step
+        if self.scheduler is not None:
+            self.writer.add_scalar("Learning rate", self.scheduler.get_last_lr()[0], self.current_epoch + 1)
+            self.scheduler.step()
+        else:
+            for param_group in self.optimizer.param_groups:
+                self.writer.add_scalar("Learning rate", param_group['lr'], self.current_epoch + 1)
 
-            if self.freeze_bn is not None:
-                if epoch > self.freeze_bn:
-                    self.student_network.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
-            if self.freeze_observer is not None:
-                if epoch > self.freeze_observer:
-                    self.student_network.apply(torch.quantization.disable_observer)
+        # Write epoch loss
+        current_epoch_loss = np.mean(mini_batch_losses)
+        self.writer.add_scalar("loss", current_epoch_loss, self.current_epoch + 1)
+        self.logger.info(f"Loss for epoch {self.current_epoch + 1} is {current_epoch_loss:.6f}")
 
-            for i, data in enumerate(train_loader, 0):
-                self.logger.info("Training on epoch " + str(self.current_epoch + 1) + ", batch " + str(i))
-                
-                inputs, target = data
+        # Periodic testing
+        if epoch % self.test_rate == 0:
+            del inputs, target
+            self.optimizer.zero_grad()
 
-                if torch.cuda.is_available():
-                    inputs, target = Variable(inputs.cuda()), Variable(target.cuda())
-                else:
-                    inputs, target = Variable(inputs), Variable(target)
+            (student_mean_recall, student_mean_precision, student_recall_list, student_precision_list,
+             teacher_mean_recall, teacher_mean_precision, teacher_recall_list, teacher_precision_list) = self.test(test_loader)
 
-                if torch.cuda.is_available():
-                    student_outputs = self.student_network(inputs).cuda()
-                else:
-                    student_outputs = self.student_network(inputs)
+            self.write_to_tensorboard(
+                epoch, self.writer, self.annotation_converter,
+                student_mean_recall, student_mean_precision,
+                student_recall_list, student_precision_list,
+                teacher_mean_recall, teacher_mean_precision,
+                teacher_recall_list, teacher_precision_list
+            )
 
-                softmaxFunction = nn.Softmax(dim=1)
+            if student_mean_recall > self.best_recall:
+                self.best_recall = student_mean_recall
+                self.best_epoch = epoch
+                self.save_model(
+                    epoch, self.student_network, self.quantization_framework,
+                    self.optimizer, self.criterion, self.annotation_converter,
+                    self.config_file['experiment']['model_save_path'] + "/" +
+                    self.config_file['experiment']['name'] + "/exp" +
+                    str(self.config_file["experiment"]["experiment_number"]) + "/best_model.pth",
+                    self.teacher_network, self.scheduler, self.quantization_function
+                )
 
-                current_loss = self.criterion(softmaxFunction(student_outputs), target)
+        self.current_epoch += 1
 
-                if self.teacher_network is not None:
-                    current_loss = (1 - self.teacher_weight) * current_loss
-                    if torch.cuda.is_available():
-                        with torch.no_grad():
-                            teacher_outputs = self.teacher_network(inputs).cuda()
-                    else:
-                        with torch.no_grad():
-                            teacher_outputs = self.teacher_network(inputs)
-                    logSoftmaxFunction, klDiv = nn.LogSoftmax(dim=1), nn.KLDivLoss()
-                    current_loss += self.teacher_weight * self.temperature**2 * klDiv(logSoftmaxFunction(student_outputs/self.temperature), softmaxFunction(teacher_outputs/self.temperature))
+    self.logger.info(f"Training complete at epoch {epoch}")
+    self.logger.info(f"The best mean recall is {self.best_recall:.6f}")
+    self.logger.info(f"The best epoch is {self.best_epoch + 1}")
 
-                mini_batch_losses.append(float(current_loss))
-                current_loss.backward()
-
-
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-
-            if self.scheduler is not None:
-                self.writer.add_scalar("Learning rate", self.scheduler.get_lr()[0], self.current_epoch + 1)
-                self.scheduler.step()
-            else:
-                for param_group in self.optimizer.param_groups:
-                    self.writer.add_scalar("Learning rate", param_group['lr'], self.current_epoch + 1)
-
-            current_epoch_loss = np.mean(mini_batch_losses)
-            self.writer.add_scalar("loss", current_epoch_loss, self.current_epoch + 1)
-            self.logger.info("Loss for epoch " + str(self.current_epoch + 1) + " is " + str(current_epoch_loss))
-
-            if epoch % self.test_rate == 0:
-                del inputs, target
-
-                self.optimizer.zero_grad()
-
-                student_mean_recall, student_mean_precision, student_recall_list, student_precision_list, teacher_mean_recall, teacher_mean_precision, teacher_recall_list, teacher_precision_list = self.test(test_loader)
-
-                self.write_to_tensorboard(epoch, self.writer, self.annotation_converter, student_mean_recall, student_mean_precision, student_recall_list, student_precision_list, teacher_mean_recall, teacher_mean_precision, teacher_recall_list, teacher_precision_list)
-
-                if student_mean_recall > self.best_recall:
-                    self.best_recall = student_mean_recall
-                    self.best_epoch = epoch
-                    self.save_model(epoch, self.student_network, self.quantization_framework, self.optimizer, self.criterion, self.annotation_converter, self.config_file['experiment']['model_save_path'] + "/" + self.config_file['experiment']['name'] + "/exp" + str(self.config_file["experiment"]["experiment_number"]) + "/best_model.pth", self.teacher_network, self.scheduler, self.quantization_function)
-
-            self.current_epoch += 1
-
-        self.logger.info("Training complete for epoch " + str(epoch))
-        self.logger.info("The best mean recall is " + str(self.best_recall))
-        self.logger.info("The best epoch is " + str(self.best_epoch + 1))
-
-        self.save_model(epoch, self.student_network, self.quantization_framework, self.optimizer, self.criterion, self.annotation_converter, self.config_file['experiment']['model_save_path'] + "/" + self.config_file['experiment']['name'] + "/exp" + str(self.config_file["experiment"]["experiment_number"]) + "/latest_model.pth", self.teacher_network, self.scheduler)
+    self.save_model(
+        epoch, self.student_network, self.quantization_framework,
+        self.optimizer, self.criterion, self.annotation_converter,
+        self.config_file['experiment']['model_save_path'] + "/" +
+        self.config_file['experiment']['name'] + "/exp" +
+        str(self.config_file["experiment"]["experiment_number"]) + "/latest_model.pth",
+        self.teacher_network, self.scheduler
+    )
 
     def test(self, test_loader):
         """
