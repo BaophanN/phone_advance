@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+
+# Virtual Environment
+env/
+venv/
+.venv/
+
+# PyTorch artifacts
+*.pth
+*.pt
+*.onnx
+
+# Training logs and outputs
+logs/
+checkpoints/
+runs/  # from TensorBoard
+*.log
+
+# Data and results
+data/
+output/
+results/
+*.csv
+*.tsv
+*.npy
+*.npz
+
+# Caches
+.cache/
+*.pickle
+*.pkl
+
+# VSCode / PyCharm
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+~*
+
+# Slurm output (if using HPC)
+slurm-*.out
+
+# Custom model outputs
+outputs/
