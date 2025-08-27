@@ -44,7 +44,7 @@ train:
     name: "SGD"
     parameter: {"lr": 0.05, "momentum": 0.9}
   batch_size: 36 #15
-  num_workers: 128 # 4
+  num_workers: 32 # 4
   scheduler:
     use: True
     name: "MultiStepLR"
